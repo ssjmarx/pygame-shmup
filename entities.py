@@ -113,6 +113,8 @@ class Circle:
 
     def split(self):
         """Splits the circle into smaller circles."""
+        from cache import calculation_cache  # Import cache system
+        
         min_split_radius = MIN_SPLIT_RADIUS * SCALE_X
 
         # Check if the circle is large enough to split
@@ -123,27 +125,34 @@ class Circle:
         num_splits = random.randint(2, 6)
 
         new_circles = []
-        split_angle = random.uniform(0, 2 * math.pi)
+        
+        # Try to get cached split configuration and angles
+        cached_config = calculation_cache.get_cached_split_configuration(num_splits)
+        cached_angles = calculation_cache.get_cached_split_angles(num_splits)
 
         # Calculate the total area we want to distribute (80% of original)
         total_target_area = math.pi * (self.radius ** 2) * 0.8
 
-        # Generate random sizes that sum to the target area
-        # We'll use a method that ensures fairness in size distribution
-        size_ratios = []
-        remaining_ratio = 1.0
+        # Use cached configuration if available, otherwise generate
+        if cached_config:
+            size_ratios = cached_config
+        else:
+            # Generate random sizes that sum to the target area
+            # We'll use a method that ensures fairness in size distribution
+            size_ratios = []
+            remaining_ratio = 1.0
 
-        for i in range(num_splits - 1):
-            # Each circle gets a random portion of the remaining area
-            ratio = random.uniform(0.1, remaining_ratio * 0.8)
-            size_ratios.append(ratio)
-            remaining_ratio -= ratio
+            for i in range(num_splits - 1):
+                # Each circle gets a random portion of the remaining area
+                ratio = random.uniform(0.1, remaining_ratio * 0.8)
+                size_ratios.append(ratio)
+                remaining_ratio -= ratio
 
-        # Last circle gets the remaining area
-        size_ratios.append(remaining_ratio)
+            # Last circle gets the remaining area
+            size_ratios.append(remaining_ratio)
 
-        # Shuffle to randomize which circle gets which size
-        random.shuffle(size_ratios)
+            # Shuffle to randomize which circle gets which size
+            random.shuffle(size_ratios)
 
         # Calculate minimum area needed for all circles
         min_total_area = num_splits * math.pi * (min_split_radius ** 2)
@@ -154,17 +163,31 @@ class Circle:
             max_possible = int(total_target_area / (math.pi * (min_split_radius ** 2)))
             num_splits = max(2, min(max_possible, 6))  # Ensure at least 2, max 6
 
-            # Recalculate size ratios with the new number
-            size_ratios = []
-            remaining_ratio = 1.0
+            # Try to get new cached configuration for the adjusted number
+            cached_config = calculation_cache.get_cached_split_configuration(num_splits)
+            cached_angles = calculation_cache.get_cached_split_angles(num_splits)
 
-            for i in range(num_splits - 1):
-                ratio = random.uniform(0.1, remaining_ratio * 0.8)
-                size_ratios.append(ratio)
-                remaining_ratio -= ratio
+            if cached_config:
+                size_ratios = cached_config
+            else:
+                # Recalculate size ratios with the new number
+                size_ratios = []
+                remaining_ratio = 1.0
 
-            size_ratios.append(remaining_ratio)
-            random.shuffle(size_ratios)
+                for i in range(num_splits - 1):
+                    ratio = random.uniform(0.1, remaining_ratio * 0.8)
+                    size_ratios.append(ratio)
+                    remaining_ratio -= ratio
+
+                size_ratios.append(remaining_ratio)
+                random.shuffle(size_ratios)
+
+        # Use cached angles if available, otherwise generate
+        if cached_angles:
+            angles = cached_angles
+        else:
+            split_angle = random.uniform(0, 2 * math.pi)
+            angles = [split_angle + (2 * math.pi * i / num_splits) for i in range(num_splits)]
 
         for i in range(num_splits):
             new_circle = Circle.__new__(Circle)
@@ -185,8 +208,8 @@ class Circle:
             new_circle.speed = self.speed * 1.2  # Slightly faster than parent
             new_circle.color = self.color
 
-            # Distribute circles evenly around the original circle
-            current_angle = split_angle + (2 * math.pi * i / num_splits)
+            # Use cached angle if available
+            current_angle = angles[i]
 
             # Position them closer together - use a fraction of the parent radius
             # This ensures they're closer together but not touching
@@ -209,6 +232,7 @@ class Circle:
         """Creates a particle cloud upon destruction."""
         from effects import particle_clouds  # Import here to avoid circular import
         from effects import Particle  # Import here to avoid circular import
+        from cache import calculation_cache  # Import cache system
         
         particles = []
         available_slots = max_objects - current_objects - OBJECT_BUFFER
@@ -236,6 +260,11 @@ class Circle:
                 from effects import ParticleCloud  # Import here to avoid circular import
                 particle_clouds.append(ParticleCloud(self.x, self.y, PARTICLE_LIFETIME))
 
+            # Try to get cached particle pattern
+            cached_pattern = calculation_cache.get_cached_particle_pattern(particle_count)
+            cached_sizes = calculation_cache.get_cached_particle_sizes(self.radius)
+            cached_colors = calculation_cache.get_cached_particle_colors(particle_count)
+
             # Scale particle size based on circle size
             # Calculate size ratio relative to the maximum possible circle size
             # This ensures max size circles create max sized particles
@@ -248,30 +277,42 @@ class Circle:
             base_speed = (self.radius / MIN_RADIUS) * 150 * SCALE_X  # Scale with circle size
             base_speed = max(100 * SCALE_X, min(base_speed, 500 * SCALE_X))  # Clamp between reasonable values
 
-            for _ in range(particle_count):
+            for i in range(particle_count):
                 # Reduced chance of creating persistent particles from 5% to 2%
                 is_persistent = random.random() < 0.02
 
-                # Calculate random angle for particle direction
-                angle = random.uniform(0, 2 * math.pi)
-
-                # Calculate initial velocity with more variation
-                # Use a random factor between 0.7 and 1.3 to add variety
-                velocity_factor = random.uniform(0.7, 1.3)
-                initial_speed = base_speed * velocity_factor
-
-                # Calculate velocity components
-                dx = math.cos(angle) * initial_speed
-                dy = math.sin(angle) * initial_speed
+                # Use cached values if available, otherwise fall back to random generation
+                if cached_pattern and i < len(cached_pattern):
+                    dx, dy = cached_pattern[i]
+                    # Scale the cached velocity to match our base speed
+                    cached_speed = math.sqrt(dx**2 + dy**2)
+                    if cached_speed > 0:
+                        dx = (dx / cached_speed) * base_speed
+                        dy = (dy / cached_speed) * base_speed
+                else:
+                    # Fallback to random generation
+                    angle = random.uniform(0, 2 * math.pi)
+                    velocity_factor = random.uniform(0.7, 1.3)
+                    initial_speed = base_speed * velocity_factor
+                    dx = math.cos(angle) * initial_speed
+                    dy = math.sin(angle) * initial_speed
 
                 # Create particle with initial velocity
                 particle = Particle(self.x, self.y, is_persistent, (dx, dy))
 
-                # Scale the particle size based on the size ratio
-                # Updated min/max sizes: 8 * SCALE_X to 24 * SCALE_X
-                min_particle_size = 8 * SCALE_X
-                max_particle_size = 24 * SCALE_X
-                particle.size = min_particle_size + (max_particle_size - min_particle_size) * size_ratio
+                # Use cached size if available, otherwise calculate
+                if cached_sizes:
+                    particle.size = cached_sizes
+                else:
+                    # Scale the particle size based on the size ratio
+                    # Updated min/max sizes: 8 * SCALE_X to 24 * SCALE_X
+                    min_particle_size = 8 * SCALE_X
+                    max_particle_size = 24 * SCALE_X
+                    particle.size = min_particle_size + (max_particle_size - min_particle_size) * size_ratio
+
+                # Use cached color if available
+                if cached_colors and i < len(cached_colors):
+                    particle.color = cached_colors[i]
 
                 # Store the initial size for shrinking effect
                 particle.initial_size = particle.size

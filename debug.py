@@ -1,18 +1,19 @@
-# made by SSJMarx with the help of GLM 4.6
+# made by SSJMarx with help of GLM 4.6
 
 import pygame
 from constants import *
 
 
 def update_debug_display(screen, font_small, clock, max_objects, current_particle_count):
-    """Displays performance debug information on screen."""
+    """Displays performance debug information on screen - DISABLED."""
+    # DISABLED: Performance display commented out
     # Get current FPS
-    current_fps = clock.get_fps()
-    fps_text = font_small.render(f"FPS: {current_fps:.1f}", True, WHITE)
-    screen.blit(fps_text, (10 * SCALE_X, 100 * SCALE_Y))
+    # current_fps = clock.get_fps()
+    # fps_text = font_small.render(f"FPS: {current_fps:.1f}", True, WHITE)
+    # screen.blit(fps_text, (10 * SCALE_X, 100 * SCALE_Y))
 
-    perf_text = font_small.render(f"Max Objects: {max_objects} | Particles: {current_particle_count}", True, WHITE)
-    screen.blit(perf_text, (10 * SCALE_X, 130 * SCALE_Y))
+    # perf_text = font_small.render(f"Max Objects: {max_objects} | Particles: {current_particle_count}", True, WHITE)
+    # screen.blit(perf_text, (10 * SCALE_X, 130 * SCALE_Y))
 
 
 def apply_screen_shake(screen, screen_shake_timer):

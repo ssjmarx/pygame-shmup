@@ -13,9 +13,12 @@ from entities import Circle
 from projectiles import Projectile
 from effects import Particle, Explosion, ParticleCloud, Star
 from gamelogic import destroy_circle, cleanup_and_update_max
-from ui import draw_game_ui
+from ui import draw_game_ui, start_game_screen, game_over_screen
 from debug import update_debug_display, apply_screen_shake
 from playarea import draw_game_objects, update_particle_clouds
+from sounds import sound_manager
+from cache import calculation_cache
+from loading import show_loading_screen
 
 # Game states
 START = "start"
@@ -59,6 +62,8 @@ mouse_hold_time = 0.0
 current_fire_delay = AUTO_FIRE_BASE_DELAY
 last_click_time = 0.0
 click_count = 0
+play_missile_sound = False
+play_shoot_sound = False
 
 
 def initialize_game():
@@ -70,14 +75,25 @@ def initialize_game():
     clock = pygame.time.Clock()
     font_small = pygame.font.SysFont(None, int(24 * SCALE_X))
     
-    # Initialize stars
-    if not stars:
-        star_direction = random.uniform(0, 2 * math.pi)
-        for _ in range(STAR_COUNT):
-            stars.append(Star(random.uniform(0, SCREEN_WIDTH), random.uniform(0, SCREEN_HEIGHT)))
+    # Initialize game components during loading
+    def initialize_all_game_components():
+        # Preload calculations
+        if not calculation_cache.is_preloaded:
+            calculation_cache.preload_all()
+        
+        # Initialize stars
+        if not stars:
+            star_direction = random.uniform(0, 2 * math.pi)
+            for _ in range(STAR_COUNT):
+                stars.append(Star(random.uniform(0, SCREEN_WIDTH), random.uniform(0, SCREEN_HEIGHT)))
+        
+        # Initialize player
+        player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+        
+        return True
     
-    # Initialize player
-    player = Player(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    # Show loading screen while initializing everything
+    show_loading_screen(screen, clock, initialize_all_game_components)
 
 
 def reset_game():
@@ -131,6 +147,20 @@ def player_logic(dt):
             if event.key == pygame.K_F2:
                 global show_performance
                 show_performance = not show_performance
+            elif event.key == pygame.K_m:
+                # Toggle sound on/off
+                sound_manager.toggle()
+                print(f"Sound {'enabled' if sound_manager.enabled else 'disabled'}")
+            elif event.key == pygame.K_EQUALS or event.key == pygame.K_PLUS:
+                # Increase volume
+                new_volume = min(1.0, sound_manager.volume + 0.1)
+                sound_manager.set_volume(new_volume)
+                print(f"Volume: {int(new_volume * 100)}%")
+            elif event.key == pygame.K_MINUS:
+                # Decrease volume
+                new_volume = max(0.0, sound_manager.volume - 0.1)
+                sound_manager.set_volume(new_volume)
+                print(f"Volume: {int(new_volume * 100)}%")
             elif event.key == pygame.K_ESCAPE:
                 return False
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -162,6 +192,17 @@ def player_logic(dt):
     return True
 
 
+def get_projectile_count():
+    """Determine projectile count based on current upgrade level."""
+    global circle_hits
+    if circle_hits >= 125:
+        return 5
+    elif circle_hits >= 25:
+        return 3
+    else:
+        return 1
+
+
 def game_logic(dt):
     """Update game logic at 20 FPS."""
     global circles, projectiles, particles, explosions, particle_clouds
@@ -169,6 +210,11 @@ def game_logic(dt):
     global mouse_held, mouse_hold_time, single_fire_shot, circle_hits
     global last_click_time, current_time, screen_shake_timer, game_over
     global player, score, start_time
+    global play_missile_sound, play_shoot_sound  # Sound trigger flags
+    
+    # Reset sound triggers
+    play_missile_sound = False
+    play_shoot_sound = False
     
     # Update score (only if not game over)
     if not game_over:
@@ -211,6 +257,7 @@ def game_logic(dt):
             explosions.append(Explosion(player.rect.centerx, player.rect.centery,
                                         200 * SCALE_X, 10.0, 0.5))
             player.apply_shake(10.0)
+            sound_manager.play('death')
     
     # Update player death animation
     if player.is_dying:
@@ -285,15 +332,12 @@ def game_logic(dt):
     is_single_shot = (click_count == 1 and not single_fire_shot and
                       (current_time - last_click_time) < RAPID_CLICK_THRESHOLD)
     
-    # Handle firing
+    # Handle firing - completely rewritten logic
     if mouse_held and not player.is_dying:
-        if is_single_shot:
-            projectile_count = 1
-            if circle_hits >= 125:
-                projectile_count = 5
-            elif circle_hits >= 25:
-                projectile_count = 3
-            
+        # Check if this should be a single shot (homing) or auto-fire
+        if is_single_shot and not single_fire_shot:
+            # Single click - fire homing shots
+            projectile_count = get_projectile_count()
             total_objects = len(circles) + len(projectiles) + len(particles)
             if total_objects + projectile_count < max_objects:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
@@ -311,17 +355,25 @@ def game_logic(dt):
                         Projectile(player.rect.centerx, player.rect.centery, target_x, target_y, player.vx,
                                    player.vy, SINGLE_FIRE_HOMING_STRENGTH, SINGLE_FIRE_COLOR,
                                    SINGLE_FIRE_SIZE_MULTIPLIER))
+                    play_missile_sound = True
             single_fire_shot = True
         
-        elif mouse_held and (mouse_hold_time > 0 or click_count > 1) and not player.is_dying:
-            auto_fire_timer += 1
+        else:
+            # Auto-fire logic (either holding mouse or single shot was already used)
+            auto_fire_timer += 1  # Increment by frame count since we're in 20 FPS loop
+            
+            # Calculate current fire delay based on hold time (ramp-up effect)
+            if mouse_held:
+                mouse_hold_time += dt
+                hold_ratio = min(1.0, mouse_hold_time / AUTO_FIRE_RAMP_UP_TIME)
+                current_fire_delay = AUTO_FIRE_BASE_DELAY - (
+                    AUTO_FIRE_BASE_DELAY - AUTO_FIRE_MIN_DELAY) * hold_ratio
+            else:
+                current_fire_delay = AUTO_FIRE_BASE_DELAY
+            
+            # Check if it's time to fire
             if auto_fire_timer >= current_fire_delay:
-                projectile_count = 1
-                if circle_hits >= 125:
-                    projectile_count = 5
-                elif circle_hits >= 25:
-                    projectile_count = 3
-                
+                projectile_count = get_projectile_count()
                 total_objects = len(circles) + len(projectiles) + len(particles)
                 if total_objects + projectile_count < max_objects:
                     mouse_x, mouse_y = pygame.mouse.get_pos()
@@ -338,6 +390,7 @@ def game_logic(dt):
                         projectiles.append(
                             Projectile(player.rect.centerx, player.rect.centery, target_x, target_y, player.vx,
                                        player.vy, HOMING_STRENGTH, AUTO_FIRE_COLOR, size_multiplier))
+                        play_shoot_sound = True
                 auto_fire_timer = 0
     
     # Spawning logic
@@ -356,12 +409,32 @@ def game_logic(dt):
                 circles_to_destroy.add(circle1)
                 circles_to_destroy.add(circle2)
     if circles_to_destroy:
+        # sound_manager.play('collision')  # Commented out - destruction sounds provide enough feedback
         for circle in circles_to_destroy:
             destroy_circle(circle, circles, particles, max_objects, explosions)
         screen_shake_timer = SCREEN_SHAKE_DURATION
     
     if screen_shake_timer > 0:
         screen_shake_timer -= 1
+    
+    # Update particle clouds (moved from render loop to 20 FPS)
+    update_particle_clouds(particle_clouds, LOGIC_TIMESTEP, global_frame_counter, particles)
+    
+    # Update stars (moved from render loop to 20 FPS)
+    for star in stars[:]:
+        star.update(LOGIC_TIMESTEP, star_direction)
+        if star.is_off_screen():
+            stars.remove(star)
+            stars.append(Star(direction=star_direction))
+    
+    # Update cache system
+    calculation_cache.update_cache(LOGIC_TIMESTEP)
+    
+    # Play sounds based on trigger flags (moved to 20 FPS loop for performance)
+    if play_missile_sound:
+        sound_manager.play('missile')
+    if play_shoot_sound:
+        sound_manager.play('shoot')
 
 
 def render():
@@ -374,15 +447,6 @@ def render():
     alpha = accumulator / LOGIC_TIMESTEP
     player_alpha = player_accumulator / PLAYER_LOGIC_TIMESTEP
     
-    # Update particle clouds
-    update_particle_clouds(particle_clouds, 1/120, global_frame_counter, particles)
-    
-    # Update stars
-    for star in stars[:]:
-        star.update(1/120, star_direction)
-        if star.is_off_screen():
-            stars.remove(star)
-            stars.append(Star(direction=star_direction))
     
     # Draw background
     screen.fill(BACKGROUND_BLUE)
@@ -448,7 +512,7 @@ def render():
 
 
 def main():
-    """Main game function - controls other functions at 120 FPS."""
+    """Main game function - continuous game logic with UI overlays."""
     global game_state, accumulator, player_accumulator, game_over_accumulator
     global global_frame_counter, last_cleanup_frame, spawn_timer, spawn_delay
     global circles, projectiles, particles, explosions, particle_clouds, max_objects
@@ -463,7 +527,7 @@ def main():
         game_over_accumulator += frame_time
         global_frame_counter += 1
         
-        # Handle input and player logic at 120 FPS
+        # Handle input based on game state
         if game_state == START:
             # Handle start screen input
             for event in pygame.event.get():
@@ -484,12 +548,12 @@ def main():
                         reset_game()
                     elif event.key == pygame.K_ESCAPE:
                         running = False
-        else:
+        else:  # PLAYING
             # Handle game input
             if not player_logic(PLAYER_LOGIC_TIMESTEP):
                 running = False
         
-        # Update game logic at 20 FPS
+        # Update game logic at 20 FPS (runs in all states)
         while accumulator >= LOGIC_TIMESTEP:
             if game_state == PLAYING:
                 game_logic(LOGIC_TIMESTEP)
@@ -541,10 +605,29 @@ def main():
                     cloud.update(LOGIC_TIMESTEP)
                     if cloud.is_expired():
                         particle_clouds.remove(cloud)
+                
+                # Check circle-to-circle collisions
+                circles_to_destroy = set()
+                for i, circle1 in enumerate(circles):
+                    for circle2 in circles[i + 1:]:
+                        if circle1.collides_with_circle(circle2):
+                            circles_to_destroy.add(circle1)
+                            circles_to_destroy.add(circle2)
+                if circles_to_destroy:
+                    for circle in circles_to_destroy:
+                        destroy_circle(circle, circles, particles, max_objects, explosions)
+                    screen_shake_timer = SCREEN_SHAKE_DURATION
+            else:  # START state - just update stars
+                # Update stars (moved from render loop to 20 FPS)
+                for star in stars[:]:
+                    star.update(LOGIC_TIMESTEP, star_direction)
+                    if star.is_off_screen():
+                        stars.remove(star)
+                        stars.append(Star(direction=star_direction))
             
             accumulator -= LOGIC_TIMESTEP
         
-        # Update player accumulator
+        # Update player accumulator (only when playing)
         while player_accumulator >= PLAYER_LOGIC_TIMESTEP:
             if game_state == PLAYING:
                 player_logic(PLAYER_LOGIC_TIMESTEP)
@@ -556,16 +639,16 @@ def main():
         while game_over_accumulator >= LOGIC_TIMESTEP:
             game_over_accumulator -= LOGIC_TIMESTEP
         
-        # Performance monitoring
-        if global_frame_counter % FPS_CHECK_INTERVAL == 0:
-            current_fps = clock.get_fps()
-            if current_fps < 60 and (global_frame_counter - last_cleanup_frame) > FPS_CHECK_INTERVAL * 2:
-                objects_dict = {'circles': circles, 'projectiles': projectiles, 'particles': particles}
-                max_objects = cleanup_and_update_max(objects_dict, max_objects)
-                particles = objects_dict['particles']
-                last_cleanup_frame = global_frame_counter
+        # Performance monitoring - DISABLED
+        # if global_frame_counter % FPS_CHECK_INTERVAL == 0:
+        #     current_fps = clock.get_fps()
+        #     if current_fps < 60 and (global_frame_counter - last_cleanup_frame) > FPS_CHECK_INTERVAL * 2:
+        #         objects_dict = {'circles': circles, 'projectiles': projectiles, 'particles': particles}
+        #         max_objects = cleanup_and_update_max(objects_dict, max_objects)
+        #         particles = objects_dict['particles']
+        #         last_cleanup_frame = global_frame_counter
         
-        # Render at variable FPS (capped at 120)
+        # Render everything with UI overlays
         render()
         clock.tick(120)
 

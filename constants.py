@@ -91,9 +91,13 @@ PARTICLE_CLEANUP_RATIO = 0.7
 # Particle Generation Variables
 INITIAL_PARTICLE_COUNT = 20  # Base number of particles when game starts
 
-# Performance Variables (truly global, will persist across game sessions)
-max_objects = INITIAL_MAX_OBJECTS  # Current maximum number of objects
-current_particle_count = INITIAL_PARTICLE_COUNT  # Current number of particles (will be reduced)
+# Performance Variables (truly global, will persist across game sessions) - DISABLED
+# max_objects = INITIAL_MAX_OBJECTS  # Current maximum number of objects
+# current_particle_count = INITIAL_PARTICLE_COUNT  # Current number of particles (will be reduced)
+
+# Fixed values to use instead of dynamic optimization
+max_objects = INITIAL_MAX_OBJECTS  # Fixed maximum number of objects
+current_particle_count = INITIAL_PARTICLE_COUNT  # Fixed particle count
 
 # Particle Cloud Tracking
 particle_clouds = []  # List to track active particle clouds
@@ -110,3 +114,13 @@ STAR_COLORS = [
     (200, 200, 255),  # Light blue
     (255, 200, 200),  # Light cyan
 ]
+
+# Sound Constants
+SOUND_ENABLED = True
+SOUND_VOLUME = 0.5
+SOUND_SHOOT_FREQ = 660  # Hz
+SOUND_HIT_FREQ = 330    # Hz
+SOUND_DEATH_START_FREQ = 880  # Hz
+SOUND_DEATH_END_FREQ = 110    # Hz
+SOUND_COLLISION_FREQ1 = 440    # Hz
+SOUND_COLLISION_FREQ2 = 220    # Hz
