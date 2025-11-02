@@ -4,13 +4,6 @@ import pygame
 from constants import *
 
 
-def draw_background(screen):
-    """Draws the background of the play area."""
-    screen.fill(BACKGROUND_BLUE)
-
-
-
-
 def draw_game_objects(screen, player, circles, projectiles, particles, alpha, player_alpha, game_over):
     """Draws all game objects in the correct order."""
     # Draw particles (background layer)
@@ -18,8 +11,8 @@ def draw_game_objects(screen, player, circles, projectiles, particles, alpha, pl
         if not particle.draw_in_front:
             particle.draw(screen)
 
-    # Draw player (only if not in game over state, even if dying)
-    if not game_over:
+    # Draw player (only if player exists and not in game over state, even if dying)
+    if player is not None and not game_over:
         player.draw(screen, player_alpha)
 
     # Draw circles
